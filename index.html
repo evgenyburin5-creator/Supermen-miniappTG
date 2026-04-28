@@ -7,29 +7,68 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;}
-html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:-apple-system,BlinkMacSystemFont,sans-serif;}
+html,body{width:100%;height:100%;overflow:hidden;background:#87ceeb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;}
 #wrap{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;}
 canvas{display:block;-ms-touch-action:none;touch-action:none;}
-#overlay{display:none;position:absolute;top:50%;left:50%;-webkit-transform:translate(-50%,-50%);transform:translate(-50%,-50%);background:rgba(15,25,45,0.9);color:#fff;padding:28px 32px;border-radius:18px;text-align:center;z-index:10;min-width:240px;}
-#otitle{font-size:24px;font-weight:700;margin-bottom:6px;}
-#osub{font-size:15px;opacity:0.85;margin-bottom:20px;line-height:1.4;}
-#rbtn{padding:13px 32px;border-radius:12px;border:none;background:linear-gradient(135deg,#ff3b3b,#ff6b6b);color:#fff;font-size:16px;font-weight:700;cursor:pointer;}
+#err{display:none;position:fixed;top:10px;left:10px;right:10px;padding:12px;background:rgba(255,0,0,0.9);color:#fff;border-radius:8px;font-size:12px;z-index:1000;word-break:break-all;}
+#overlay{display:none;position:absolute;top:50%;left:50%;-webkit-transform:translate(-50%,-50%);transform:translate(-50%,-50%);background:rgba(15,25,45,0.94);color:#fff;padding:24px 26px;border-radius:18px;text-align:center;z-index:10;width:88%;max-width:340px;max-height:88vh;overflow-y:auto;}
+#otitle{font-size:22px;font-weight:700;margin-bottom:4px;}
+#oresult{font-size:15px;opacity:0.9;margin-bottom:14px;line-height:1.5;}
+#oresult b{font-size:18px;color:#ffd633;}
+#leaderboard{margin-bottom:18px;text-align:left;}
+#lb-title{font-size:14px;font-weight:700;text-align:center;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;color:#ffd633;}
+.lb-row{display:flex;align-items:center;padding:7px 10px;margin-bottom:3px;background:rgba(255,255,255,0.06);border-radius:8px;font-size:13px;}
+.lb-row.me{background:rgba(255,214,51,0.18);border:1px solid rgba(255,214,51,0.4);}
+.lb-rank{width:26px;font-weight:700;color:#aaa;}
+.lb-rank.gold{color:#ffd633;}
+.lb-rank.silver{color:#c0c0c0;}
+.lb-rank.bronze{color:#cd7f32;}
+.lb-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lb-score{font-weight:700;color:#fff;}
+#lb-loading{text-align:center;padding:14px;font-size:13px;opacity:0.6;}
+#rbtn{padding:13px 32px;border-radius:12px;border:none;background:linear-gradient(135deg,#ff3b3b,#ff6b6b);color:#fff;font-size:16px;font-weight:700;cursor:pointer;width:100%;}
 #rbtn:active{-webkit-transform:scale(0.97);transform:scale(0.97);}
 #start-hint{position:absolute;bottom:20%;left:0;right:0;text-align:center;color:#fff;font-size:16px;font-weight:600;text-shadow:0 2px 8px rgba(0,0,0,0.5);pointer-events:none;z-index:5;}
 </style>
 </head>
 <body>
+<div id="err"></div>
 <div id="wrap">
   <canvas id="c"></canvas>
   <div id="start-hint">Нажми, чтобы взлететь</div>
   <div id="overlay">
     <div id="otitle"></div>
-    <div id="osub"></div>
+    <div id="oresult"></div>
+    <div id="leaderboard">
+      <div id="lb-title">🏆 Топ 10</div>
+      <div id="lb-list"><div id="lb-loading">Загрузка...</div></div>
+    </div>
     <button id="rbtn">Начать заново</button>
   </div>
 </div>
 <script>
-// Polyfill for roundRect
+// Global error handler
+window.onerror = function(msg, url, line, col, error){
+  var e = document.getElementById('err');
+  if(e){
+    e.style.display = 'block';
+    e.textContent = 'Ошибка: ' + msg + ' (строка ' + line + ')';
+  }
+  return false;
+};
+
+// Tell Telegram we're ready as early as possible
+try {
+  if(window.Telegram && window.Telegram.WebApp){
+    window.Telegram.WebApp.ready();
+    window.Telegram.WebApp.expand();
+  }
+} catch(e){}
+// === Supabase config ===
+var SUPABASE_URL = 'https://qoapctagglwskrfmmsdb.supabase.co';
+var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFvYXBjdGFnZ2x3c2tyZm1tc2RiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczODY0MTAsImV4cCI6MjA5Mjk2MjQxMH0.YxFv2PLAUzXY7XFICMOJg5kHCoiR2FzhCK4H4JkjY1o';
+
+// === Polyfills ===
 if(typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.roundRect){
   CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
     if(typeof r === 'number') r = [r,r,r,r];
@@ -49,30 +88,116 @@ if(typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.
   };
 }
 
-// Polyfill for ellipse
-if(typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.ellipse){
-  CanvasRenderingContext2D.prototype.ellipse = function(cx,cy,rx,ry,rot,sa,ea,ccw){
-    this.save();
-    this.translate(cx,cy);
-    this.rotate(rot);
-    this.scale(rx,ry);
-    this.arc(0,0,1,sa,ea,ccw);
-    this.restore();
-  };
-}
-
+// === Telegram ===
 var tg = window.Telegram && window.Telegram.WebApp;
+var tgUser = null;
 if(tg){
   try { tg.ready(); } catch(e){}
   try { tg.expand(); } catch(e){}
-  try { tg.disableVerticalSwipes(); } catch(e){}
+  try { if(tg.disableVerticalSwipes) tg.disableVerticalSwipes(); } catch(e){}
+  if(tg.initDataUnsafe && tg.initDataUnsafe.user){
+    tgUser = tg.initDataUnsafe.user;
+  }
+}
+// fallback for testing outside telegram
+if(!tgUser){
+  var guestId;
+  try {
+    guestId = parseInt(localStorage.getItem('guest_id') || '0', 10);
+    if(!guestId){
+      guestId = Math.floor(Math.random()*1e9);
+      localStorage.setItem('guest_id', guestId+'');
+    }
+  } catch(e){
+    guestId = Math.floor(Math.random()*1e9);
+  }
+  tgUser = {
+    id: guestId,
+    username: null,
+    first_name: 'Гость'
+  };
 }
 
+function getDisplayName(){
+  if(tgUser.username) return '@' + tgUser.username;
+  return tgUser.first_name || 'Игрок';
+}
+
+// === Supabase API helpers ===
+function saveScore(totalScore){
+  return fetch(SUPABASE_URL + '/rest/v1/scores', {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal'
+    },
+    body: JSON.stringify({
+      user_id: tgUser.id,
+      username: tgUser.username || '',
+      first_name: tgUser.first_name || '',
+      score: totalScore
+    })
+  });
+}
+
+function fetchTop10(){
+  return fetch(SUPABASE_URL + '/rest/v1/scores?select=user_id,username,first_name,score&order=score.desc&limit=100', {
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_KEY
+    }
+  }).then(function(r){
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  });
+}
+
+function renderLeaderboard(rows){
+  var list = document.getElementById('lb-list');
+  if(!rows || !rows.length){
+    list.innerHTML = '<div id="lb-loading">Пока никто не играл</div>';
+    return;
+  }
+  // Dedupe by user_id, keep highest score
+  var seen = {};
+  var unique = [];
+  for(var i = 0; i < rows.length; i++){
+    var r = rows[i];
+    if(!seen[r.user_id]){
+      seen[r.user_id] = true;
+      unique.push(r);
+    }
+    if(unique.length >= 10) break;
+  }
+  var html = '';
+  for(var j = 0; j < unique.length; j++){
+    var u = unique[j];
+    var name = u.username ? '@' + u.username : (u.first_name || 'Игрок');
+    var rankCls = j === 0 ? 'gold' : j === 1 ? 'silver' : j === 2 ? 'bronze' : '';
+    var meCls = (u.user_id === tgUser.id) ? ' me' : '';
+    html += '<div class="lb-row' + meCls + '">' +
+            '<div class="lb-rank ' + rankCls + '">' + (j+1) + '</div>' +
+            '<div class="lb-name">' + escapeHtml(name) + '</div>' +
+            '<div class="lb-score">' + u.score + '</div>' +
+            '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+// === Canvas setup ===
 var canvas = document.getElementById('c');
 var ctx = canvas.getContext('2d');
 var overlay = document.getElementById('overlay');
 var otitle = document.getElementById('otitle');
-var osub = document.getElementById('osub');
+var oresult = document.getElementById('oresult');
 var rbtn = document.getElementById('rbtn');
 var startHint = document.getElementById('start-hint');
 
@@ -90,6 +215,7 @@ function resize(){
 resize();
 window.addEventListener('resize', resize);
 
+// === Game constants ===
 var BASE_SPEED = 1.4;
 var SPEED_INC = 0.025;
 var MAX_SPEED = 5.5;
@@ -98,12 +224,14 @@ var FLAP_FORCE = -5.0;
 var HERO_W = 56, HERO_H = 56;
 var PIPE_W = 56;
 var GAP_MIN = 180;
+var COIN_VALUE = 5;
+var PIPE_VALUE = 1;
 
 var SCENES = [
-  { name:'day',    sky:['#87ceeb','#cfeefb'], cloud:'rgba(255,255,255,0.85)', star:0,   sun:'#ffd84a', sunY:0.18 },
-  { name:'sunset', sky:['#ff8a5b','#ffd1a8'], cloud:'rgba(255,200,180,0.7)',  star:0,   sun:'#ff5722', sunY:0.7 },
-  { name:'night',  sky:['#0a1438','#2c3e6b'], cloud:'rgba(180,200,230,0.25)', star:1,   sun:'#e8e8f5', sunY:0.2 },
-  { name:'dawn',   sky:['#6a4b8a','#f4a3a3'], cloud:'rgba(255,220,220,0.6)',  star:0.3, sun:'#ffb37a', sunY:0.65 }
+  { sky:['#87ceeb','#cfeefb'], cloud:'rgba(255,255,255,0.85)', star:0,   sun:'#ffd84a', sunY:0.18 },
+  { sky:['#ff8a5b','#ffd1a8'], cloud:'rgba(255,200,180,0.7)',  star:0,   sun:'#ff5722', sunY:0.7 },
+  { sky:['#0a1438','#2c3e6b'], cloud:'rgba(180,200,230,0.25)', star:1,   sun:'#e8e8f5', sunY:0.2 },
+  { sky:['#6a4b8a','#f4a3a3'], cloud:'rgba(255,220,220,0.6)',  star:0.3, sun:'#ffb37a', sunY:0.65 }
 ];
 var SCENE_DURATION = 8;
 
@@ -111,6 +239,7 @@ var plane, pipes, coins, score, coinsCollected, speed, alive, started, raf, part
 var sceneIdx = 0, sceneProgress = 0;
 var mouthOpenTime = 0;
 var bgOffset = 0;
+var resultSaved = false;
 var now = Date.now;
 
 function makeObstacle(x){
@@ -135,6 +264,10 @@ function pipeSpacing(){
   return Math.max(W * 0.65, 240);
 }
 
+function getTotalScore(){
+  return score * PIPE_VALUE + coinsCollected * COIN_VALUE;
+}
+
 function startGame(){
   overlay.style.display = 'none';
   startHint.style.display = 'block';
@@ -152,6 +285,7 @@ function startGame(){
   sceneProgress = 0;
   mouthOpenTime = 0;
   bgOffset = 0;
+  resultSaved = false;
   if(raf) cancelAnimationFrame(raf);
   loop();
 }
@@ -168,7 +302,6 @@ function flap(){
 canvas.addEventListener('touchstart', function(e){ e.preventDefault(); flap(); }, false);
 canvas.addEventListener('mousedown', function(e){ e.preventDefault(); flap(); }, false);
 document.addEventListener('keydown', function(e){ if(e.code==='Space'||e.keyCode===32){ e.preventDefault(); flap(); }});
-
 rbtn.addEventListener('click', function(e){ e.stopPropagation(); startGame(); });
 rbtn.addEventListener('touchend', function(e){ e.stopPropagation(); e.preventDefault(); startGame(); }, false);
 
@@ -239,9 +372,8 @@ function drawSky(){
   ctx.fill();
   ctx.globalAlpha = 1;
 
-  var cloudCol = s.cur.cloud;
   var clouds = [[0.10,0.12,50],[0.45,0.08,38],[0.72,0.22,60],[0.20,0.30,35],[0.85,0.15,42]];
-  ctx.fillStyle = cloudCol;
+  ctx.fillStyle = s.cur.cloud;
   for(var ci = 0; ci < clouds.length; ci++){
     var cl = clouds[ci];
     var px = ((W * cl[0] - bgOffset * 0.3) % (W + 200) + W + 200) % (W + 200) - 100;
@@ -268,7 +400,7 @@ function drawSuperman(px, py, ang, alpha){
   ctx.translate(px, py);
   ctx.rotate(ang);
 
-  var capeWave = Math.sin(now() / 80) * 4;
+  var capeWave = alive ? Math.sin(now() / 80) * 4 : 0;
 
   // Cape
   ctx.fillStyle = '#cc0000';
@@ -310,7 +442,7 @@ function drawSuperman(px, py, ang, alpha){
   ctx.textBaseline = 'middle';
   ctx.fillText('S', 0, 4);
 
-  // Arms
+  // Arm
   ctx.fillStyle = '#1e5fc8';
   ctx.save();
   ctx.translate(14, -2);
@@ -326,7 +458,7 @@ function drawSuperman(px, py, ang, alpha){
   drawCircle(24, -4, 4);
   ctx.fill();
 
-  // Legs
+  // Leg
   ctx.fillStyle = '#1e5fc8';
   ctx.save();
   ctx.translate(-12, 12);
@@ -337,7 +469,7 @@ function drawSuperman(px, py, ang, alpha){
   ctx.restore();
   ctx.fill();
 
-  // Boots
+  // Boot
   ctx.fillStyle = '#cc0000';
   ctx.save();
   ctx.translate(-19, 14);
@@ -400,15 +532,12 @@ function drawObstacle(p){
   grad.addColorStop(0, '#3a4a5e');
   grad.addColorStop(0.5, '#5a6a7e');
   grad.addColorStop(1, '#2a3a4e');
-
   ctx.fillStyle = grad;
   ctx.fillRect(p.x, 0, PIPE_W, p.top);
   ctx.fillRect(p.x, p.bot, PIPE_W, H - p.bot);
-
   ctx.fillStyle = '#6a7a8e';
   ctx.fillRect(p.x - 4, p.top - 18, PIPE_W + 8, 18);
   ctx.fillRect(p.x - 4, p.bot, PIPE_W + 8, 18);
-
   ctx.fillStyle = 'rgba(255,230,150,0.55)';
   for(var y = 20; y < p.top - 25; y += 24){
     ctx.fillRect(p.x + 8, y, 12, 10);
@@ -422,7 +551,7 @@ function drawObstacle(p){
 
 function drawCoin(c){
   if(c.collected) return;
-  var wobble = Math.sin(c.phase + now() / 200) * 0.6 + 0.4;
+  var wobble = alive ? Math.sin(c.phase + now() / 200) * 0.6 + 0.4 : 1;
   var r = 13;
   ctx.save();
   ctx.translate(c.x, c.y);
@@ -528,20 +657,43 @@ function checkCoins(){
   }
 }
 
-function showOverlay(title, sub){
-  otitle.textContent = title;
-  osub.innerHTML = sub;
+function showResultOverlay(){
+  var total = getTotalScore();
+  otitle.textContent = 'Супермен сбит!';
+  oresult.innerHTML =
+    'Препятствия: <b>' + score + '</b> (×' + PIPE_VALUE + ')<br>' +
+    'Монеты: <b>' + coinsCollected + '</b> (×' + COIN_VALUE + ')<br>' +
+    'Итого: <b>' + total + '</b>';
+  document.getElementById('lb-list').innerHTML = '<div id="lb-loading">Загрузка...</div>';
   overlay.style.display = 'block';
+
+  // Save and load top
+  if(!resultSaved){
+    resultSaved = true;
+    var savePromise = total > 0 ? saveScore(total) : Promise.resolve();
+    savePromise.then(function(){
+      return fetchTop10();
+    }).then(function(rows){
+      renderLeaderboard(rows);
+    }).catch(function(err){
+      document.getElementById('lb-list').innerHTML =
+        '<div id="lb-loading">Не удалось загрузить рейтинг</div>';
+    });
+  }
 }
 
 function drawHUD(){
+  var total = getTotalScore();
+
+  // Total score (top right)
   ctx.textAlign = 'right';
   ctx.font = '700 32px sans-serif';
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
-  ctx.fillText(score, W - 18, 46);
+  ctx.fillText(total, W - 18, 46);
   ctx.fillStyle = '#fff';
-  ctx.fillText(score, W - 20, 44);
+  ctx.fillText(total, W - 20, 44);
 
+  // Coin counter (top left)
   ctx.textAlign = 'left';
   var cx2 = 30, cy2 = 36;
   var g = ctx.createRadialGradient(cx2-2, cy2-2, 1, cx2, cy2, 11);
@@ -565,9 +717,13 @@ function drawHUD(){
 
 function loop(){
   ctx.clearRect(0, 0, W, H);
-  bgOffset += speed * 0.5;
+
+  // If alive — update background offset
+  if(alive && started) bgOffset += speed * 0.5;
+
   drawSky();
 
+  // Pre-game state
   if(!started){
     for(var i = 0; i < pipes.length; i++) drawObstacle(pipes[i]);
     for(var i2 = 0; i2 < coins.length; i2++) drawCoin(coins[i2]);
@@ -577,80 +733,81 @@ function loop(){
     return;
   }
 
-  plane.vy += GRAVITY;
-  plane.y += plane.vy;
-  plane.angle = Math.max(-0.5, Math.min(0.9, plane.vy * 0.06));
+  // === When alive, do full update ===
+  if(alive){
+    plane.vy += GRAVITY;
+    plane.y += plane.vy;
+    plane.angle = Math.max(-0.5, Math.min(0.9, plane.vy * 0.06));
 
-  plane.trail.push({ x:plane.x - 22, y:plane.y + 2 });
-  if(plane.trail.length > 14) plane.trail.shift();
+    plane.trail.push({ x:plane.x - 22, y:plane.y + 2 });
+    if(plane.trail.length > 14) plane.trail.shift();
+
+    for(var pi = 0; pi < pipes.length; pi++){
+      var p = pipes[pi];
+      p.x -= speed;
+      if(!p.passed && p.x + PIPE_W < plane.x){
+        p.passed = true;
+        score++;
+        sceneProgress++;
+        speed = Math.min(MAX_SPEED, BASE_SPEED + Math.pow(score, 0.7) * SPEED_INC);
+        if(sceneProgress >= SCENE_DURATION){
+          sceneIdx = (sceneIdx + 1) % SCENES.length;
+          sceneProgress = 0;
+        }
+      }
+    }
+
+    if(pipes[0].x + PIPE_W < -30){
+      pipes.shift();
+      var newPipe = makeObstacle(pipes[pipes.length-1].x + pipeSpacing());
+      pipes.push(newPipe);
+      coins.push(makeCoin(pipes[pipes.length-2], newPipe));
+    }
+
+    for(var ci = 0; ci < coins.length; ci++){
+      coins[ci].x -= speed;
+    }
+    var newCoins = [];
+    for(var ci2 = 0; ci2 < coins.length; ci2++){
+      var cc = coins[ci2];
+      if(cc.x > -30 && !(cc.collected && now() - mouthOpenTime > 500)){
+        newCoins.push(cc);
+      }
+    }
+    coins = newCoins;
+
+    checkCoins();
+
+    if(hitTest()){
+      alive = false;
+      spawnCrashParticles(plane.x, plane.y);
+      haptic('hit');
+      setTimeout(showResultOverlay, 800);
+    }
+  }
+
+  // === Draw everything (frozen if dead) ===
+
+  // Trail
   for(var ti = 0; ti < plane.trail.length; ti++){
     var tr = plane.trail[ti];
     ctx.save();
     ctx.globalAlpha = (ti / plane.trail.length) * 0.22;
     ctx.fillStyle = '#fff';
-    ctx.save();
     ctx.translate(tr.x, tr.y);
     ctx.scale(6, 2.5);
     ctx.beginPath();
     ctx.arc(0, 0, 1, 0, Math.PI*2);
-    ctx.restore();
     ctx.fill();
     ctx.restore();
   }
 
-  for(var pi = 0; pi < pipes.length; pi++){
-    var p = pipes[pi];
-    p.x -= speed;
-    drawObstacle(p);
-    if(!p.passed && p.x + PIPE_W < plane.x){
-      p.passed = true;
-      score++;
-      sceneProgress++;
-      speed = Math.min(MAX_SPEED, BASE_SPEED + Math.pow(score, 0.7) * SPEED_INC);
-      if(sceneProgress >= SCENE_DURATION){
-        sceneIdx = (sceneIdx + 1) % SCENES.length;
-        sceneProgress = 0;
-      }
-    }
-  }
-
-  if(pipes[0].x + PIPE_W < -30){
-    pipes.shift();
-    var newPipe = makeObstacle(pipes[pipes.length-1].x + pipeSpacing());
-    pipes.push(newPipe);
-    coins.push(makeCoin(pipes[pipes.length-2], newPipe));
-  }
-
-  for(var ci = 0; ci < coins.length; ci++){
-    coins[ci].x -= speed;
-  }
-  var newCoins = [];
-  for(var ci2 = 0; ci2 < coins.length; ci2++){
-    var cc = coins[ci2];
-    if(cc.x > -30 && !(cc.collected && now() - mouthOpenTime > 500)){
-      newCoins.push(cc);
-    }
-  }
-  coins = newCoins;
+  for(var pi2 = 0; pi2 < pipes.length; pi2++) drawObstacle(pipes[pi2]);
   for(var ci3 = 0; ci3 < coins.length; ci3++) drawCoin(coins[ci3]);
-
-  if(alive) checkCoins();
-
-  if(alive && hitTest()){
-    alive = false;
-    spawnCrashParticles(plane.x, plane.y);
-    haptic('hit');
-    var m = score < 3 ? 'Попробуй ещё раз!' :
-            score < 10 ? 'Неплохо!' :
-            score < 20 ? 'Отличный результат!' : 'Легенда!';
-    setTimeout(function(){
-      showOverlay('Супермен сбит!', 'Очки: <b>'+score+'</b><br>Монет: <b>'+coinsCollected+'</b><br>'+m);
-    }, 700);
-  }
 
   if(!alive){
     updateParticles();
-    drawSuperman(plane.x, plane.y, plane.angle + 0.7, 0.4);
+    drawSuperman(plane.x, plane.y, plane.angle + 0.7, 0.5);
   } else {
     drawSuperman(plane.x, plane.y, plane.angle);
   }
